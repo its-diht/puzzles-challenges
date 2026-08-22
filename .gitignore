@@ -1,0 +1,7 @@
+content/
+stages_local.py
+__pycache__/
+*.pyc
+
+# plaintext QR must never be committed -- only qr.png.enc ships
+/qr.png

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title></title>
+<style>
+  html, body { margin: 0; height: 100%; background: #585858; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color: #ddd;
+  }
+  #lock-screen { text-align: center; padding: 1.5em; max-width: 24em; }
+  #lock-screen p.prompt { margin: 0 0 1em; letter-spacing: .18em;
+    text-transform: uppercase; font-size: .8rem; color: #bbb; }
+  #unlock-form { display: inline-flex; gap: .5em; }
+  #unlock-input {
+    font: inherit; padding: .55em .7em; width: 12em;
+    background: #333; border: 1px solid #666; color: #eee; border-radius: 3px;
+    outline: none; text-align: center; letter-spacing: .1em;
+  }
+  #unlock-input:focus { border-color: #999; }
+  #unlock-form button {
+    font: inherit; padding: .55em 1em; cursor: pointer;
+    background: #eee; border: none; color: #111; border-radius: 3px;
+  }
+  #unlock-error { color: #f2a5a5; min-height: 1.2em; margin-top: .8em; font-size: .8rem; }
+  #unlock-status { color: #cfe0ea; min-height: 1.2em; margin-bottom: .8em; font-size: .8rem; }
+  #download-link {
+    display: inline-flex; align-items: center; gap: .55em;
+    padding: .65em 1.3em; font: inherit; font-size: .9rem;
+    background: #eee; color: #111; border-radius: 4px;
+    text-decoration: none; cursor: pointer;
+  }
+  #download-link:hover { background: #fff; }
+  #download-link svg { width: 1.1em; height: 1.1em; flex: none; }
+</style>
+</head>
+<body>
+  <div id="lock-screen">
+    <div id="entry-section">
+      <p class="prompt">enter key</p>
+      <form id="unlock-form">
+        <input type="text" id="unlock-input" autocomplete="off" autofocus spellcheck="false">
+        <button type="submit">&rarr;</button>
+      </form>
+      <p id="unlock-error"></p>
+    </div>
+    <div id="result-section" style="display: none;">
+      <p id="unlock-status"></p>
+      <a id="download-link" download>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12"></path>
+          <path d="M7 10l5 5 5-5"></path>
+          <path d="M4 19h16"></path>
+        </svg>
+        <span id="download-label"></span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Loaded blocking (NOT defer) so window.ARGCrypto exists by the time the
+       inline script below runs: `defer` is ignored on inline scripts, so an
+       inline block always executes during parsing, ahead of any deferred file. -->
+  <script src="../unlock.js"></script>
+<script>
+(function () {
+  const CANDIDATES = [{"salt": "aZUyNKB5Sns95jg3kIMq3g==", "iterations": 250000, "asset": "share_1.txt.enc", "name": "share_1.txt"}, {"salt": "gUvAPqakBprsHk1vhKb3hA==", "iterations": 250000, "asset": "share_2.txt.enc", "name": "share_2.txt"}, {"salt": "0e+EvFWiqR9ldV0gcXNOdg==", "iterations": 250000, "asset": "share_3.txt.enc", "name": "share_3.txt"}, {"salt": "Gcu1k8qLNKBdaONuA/MdvQ==", "iterations": 250000, "asset": "share_4.txt.enc", "name": "share_4.txt"}];
+
+  // Crypto primitives come from unlock.js (window.ARGCrypto) so normalize(),
+  // base64 decoding, key derivation and IV_LEN have exactly one definition.
+  // unlock.js is loaded above purely as a library -- its own unlock handler
+  // no-ops here because this page has no #stage-data element.
+  const { normalize, b64ToBytes, deriveKey, IV_LEN } = window.ARGCrypto;
+
+  async function tryCandidate(candidate, password) {
+    const salt = b64ToBytes(candidate.salt);
+    const key = await deriveKey(password, salt, candidate.iterations);
+    const res = await fetch(candidate.asset);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    const iv = buf.slice(0, IV_LEN);
+    const ciphertext = buf.slice(IV_LEN);
+    // Throws (auth tag mismatch) whenever this candidate isn't the right one
+    // for the entered passphrase -- that's the whole access-control mechanism.
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  }
+
+  async function tryUnlock(rawKey, errorEl, statusEl, linkEl, labelEl, entrySection, resultSection) {
+    const password = normalize(rawKey);
+    for (const candidate of CANDIDATES) {
+      try {
+        const plainBuf = await tryCandidate(candidate, password);
+        const url = URL.createObjectURL(new Blob([plainBuf], { type: "text/plain" }));
+        linkEl.href = url;
+        linkEl.download = candidate.name;
+        labelEl.textContent = candidate.name;
+        statusEl.textContent = "key accepted";
+        entrySection.style.display = "none";
+        resultSection.style.display = "block";
+        return true;
+      } catch (e) {
+        // Wrong key for this candidate -- move on and try the next one.
+      }
+    }
+    errorEl.textContent = "Incorrect key.";
+    return false;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const form = document.getElementById("unlock-form");
+    const input = document.getElementById("unlock-input");
+    const errorEl = document.getElementById("unlock-error");
+    const statusEl = document.getElementById("unlock-status");
+    const linkEl = document.getElementById("download-link");
+    const labelEl = document.getElementById("download-label");
+    const entrySection = document.getElementById("entry-section");
+    const resultSection = document.getElementById("result-section");
+
+    // URL fragment unlock, same convention as every other page here:
+    // https://site/share/#<key> -- location.hash is never sent to the server.
+    if (location.hash.length > 1) {
+      tryUnlock(decodeURIComponent(location.hash.slice(1)), errorEl, statusEl, linkEl, labelEl, entrySection, resultSection);
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+      await tryUnlock(input.value, errorEl, statusEl, linkEl, labelEl, entrySection, resultSection);
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title></title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color: #bbb;
+  }
+  #lock-screen { text-align: center; padding: 1.5em; }
+  #lock-screen p.prompt { margin: 0 0 1em; letter-spacing: .18em;
+    text-transform: uppercase; font-size: .8rem; color: #777; }
+  #unlock-form { display: inline-flex; gap: .5em; }
+  #unlock-input {
+    font: inherit; padding: .55em .7em; width: 12em;
+    background: #0d0d0d; border: 1px solid #333; color: #eee; border-radius: 3px;
+    outline: none; text-align: center; letter-spacing: .1em;
+  }
+  #unlock-input:focus { border-color: #666; }
+  #unlock-form button {
+    font: inherit; padding: .55em 1em; cursor: pointer;
+    background: #eee; border: none; color: #111; border-radius: 3px;
+  }
+  #unlock-error { color: #a33; min-height: 1.2em; margin-top: .8em; font-size: .8rem; }
+</style>
+</head>
+<body>
+  <div id="lock-screen">
+    <p class="prompt">enter passcode</p>
+    <form id="unlock-form">
+      <input type="text" id="unlock-input" autocomplete="off" autofocus spellcheck="false">
+      <button type="submit">&rarr;</button>
+    </form>
+    <p id="unlock-error"></p>
+  </div>
+
+  <script id="stage-data" type="application/json">{"salt": "/IFeJkHkkC9ubboyCpBYKw==", "iv": "2cbkE43oamJWzOs2", "ciphertext": "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", "iterations": 250000}</script>
+  <script src="unlock.js" defer></script>
+</body>
+</html>

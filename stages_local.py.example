@@ -1,0 +1,32 @@
+# Copy this file to stages_local.py and fill in real answers/content.
+# stages_local.py is gitignored -- it must never be committed.
+from build import load
+
+# Front page at the site root: (passcode, page HTML, [assets in content/]).
+# Unlock via typed passcode or an entry URL fragment: https://<site>/#<passcode>
+FRONT = ("frontpasscode", load("front.html"), ["qr.png"])
+
+STAGES = [
+    # (answer that unlocks this stage, folder name, this stage's raw HTML,
+    #  [asset filenames in content/])
+    #
+    # SECURITY: folder names must be RANDOM and unrelated to the answers -- see
+    # the note at the top of build.py. Generate one with:
+    #     python -c "import secrets; print(secrets.token_hex(16))"
+    # Deriving the folder from the answer (e.g. sha256(answer)[:32]) leaks it:
+    # folder names are public, and a fast unsalted hash is trivially brute-forced.
+    #
+    # These are fixed constants -- changing one changes that stage's public URL,
+    # so regenerate any QR code or link image that points at it.
+    ("firstclue", "0f2b8c1d4e6a7b9c0d1e2f3a4b5c6d7e", load("stage1.html"), []),
+    ("secondclue", "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d", load("stage2.html"), ["some_image.png", "some_audio.wav"]),
+]
+
+# Optional: one shared download page at /share/, where each key unlocks a
+# DIFFERENT file (wrong key for a given file just fails to decrypt it -- no
+# separate access-control check needed). Omit SHARE entirely to skip this page.
+SHARE = [
+    # (key, filename in content/)
+    ("firstsharekey", "share_1.txt"),
+    ("secondsharekey", "share_2.txt"),
+]
