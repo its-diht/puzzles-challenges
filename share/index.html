@@ -69,44 +69,80 @@
   <script src="../unlock.js"></script>
 <script>
 (function () {
-  const CANDIDATES = [{"salt": "5L5/agYAhA80D2n7sBz0qg==", "iterations": 250000, "asset": "share_1.txt.enc", "name": "share_1.txt"}, {"salt": "+KSYVaVJ7qp807Y22h8c+g==", "iterations": 250000, "asset": "share_2.txt.enc", "name": "share_2.txt"}, {"salt": "n1ds/bEETCQALBdxgcI4VA==", "iterations": 250000, "asset": "share_3.txt.enc", "name": "share_3.txt"}, {"salt": "NuPSUX64qbnLodfD2eyHng==", "iterations": 250000, "asset": "share_4.txt.enc", "name": "share_4.txt"}];
+  const CANDIDATES = [{"salt": "thJgepMezRSQzqymsMJk4w==", "iterations": 250000, "asset": "share_1.txt.enc", "name": "share_1.txt"}, {"salt": "dDKthpyLYc+0/TGf3BN0Ig==", "iterations": 250000, "asset": "share_2.txt.enc", "name": "share_2.txt"}, {"salt": "7iNvIVDvUZgmnyUhpiL2FQ==", "iterations": 250000, "asset": "share_3.txt.enc", "name": "share_3.txt"}, {"salt": "KHC8c77g04HroekWV8Hxeg==", "iterations": 250000, "asset": "share_4.txt.enc", "name": "share_4.txt"}];
 
   // Crypto primitives come from unlock.js (window.ARGCrypto) so normalize(),
   // base64 decoding, key derivation and IV_LEN have exactly one definition.
   // unlock.js is loaded above purely as a library -- its own unlock handler
-  // no-ops here because this page has no #stage-data element.
-  const { normalize, b64ToBytes, deriveKey, IV_LEN } = window.ARGCrypto;
+  // no-ops here because this page has no #stage-data element. Held by
+  // reference rather than destructured: if the script failed to load, that is
+  // worth reporting, not an uncaught TypeError that leaves the form dead.
+  const ARGC = window.ARGCrypto || null;
 
+  // Resolves to the decrypted bytes, or to null when this candidate simply
+  // isn't the file the entered passphrase opens. Anything else -- a missing
+  // asset, a malformed blob -- throws, because that's a fault in the page
+  // rather than a wrong key, and the two must not read the same.
   async function tryCandidate(candidate, password) {
-    const salt = b64ToBytes(candidate.salt);
-    const key = await deriveKey(password, salt, candidate.iterations);
+    const salt = ARGC.b64ToBytes(candidate.salt);
+    const key = await ARGC.deriveKey(password, salt, candidate.iterations);
     const res = await fetch(candidate.asset);
+    if (!res.ok) throw new Error("fetch " + candidate.asset + " -> HTTP " + res.status);
     const buf = new Uint8Array(await res.arrayBuffer());
-    const iv = buf.slice(0, IV_LEN);
-    const ciphertext = buf.slice(IV_LEN);
-    // Throws (auth tag mismatch) whenever this candidate isn't the right one
-    // for the entered passphrase -- that's the whole access-control mechanism.
-    return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    const iv = buf.slice(0, ARGC.IV_LEN);
+    const ciphertext = buf.slice(ARGC.IV_LEN);
+    try {
+      // Throws (auth tag mismatch) whenever this candidate isn't the right one
+      // for the entered passphrase -- that's the whole access-control mechanism.
+      return await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    } catch (e) {
+      return null;
+    }
   }
 
   async function tryUnlock(rawKey, errorEl, statusEl, linkEl, labelEl, entrySection, resultSection) {
-    const password = normalize(rawKey);
-    for (const candidate of CANDIDATES) {
-      try {
-        const plainBuf = await tryCandidate(candidate, password);
-        const url = URL.createObjectURL(new Blob([plainBuf], { type: "text/plain" }));
-        linkEl.href = url;
-        linkEl.download = candidate.name;
-        labelEl.textContent = candidate.name;
-        statusEl.textContent = "key accepted";
-        entrySection.style.display = "none";
-        resultSection.style.display = "block";
-        return true;
-      } catch (e) {
-        // Wrong key for this candidate -- move on and try the next one.
-      }
+    if (!ARGC) {
+      console.error("[share] unlock.js did not load");
+      errorEl.textContent = "Couldn't load unlock.js -- reload the page.";
+      return false;
     }
-    errorEl.textContent = "Incorrect key.";
+    // typeof-guarded: during a Pages deploy a cached older unlock.js can be
+    // paired with this page, and an uncaught TypeError here would leave the
+    // form silently dead -- the exact failure this whole change exists to kill.
+    const blocked = typeof ARGC.cryptoUnavailable === "function" ? ARGC.cryptoUnavailable() : null;
+    if (blocked) {
+      console.error("[share] " + blocked + " (crypto.subtle is unavailable)");
+      errorEl.textContent = blocked;
+      return false;
+    }
+    const password = ARGC.normalize(rawKey);
+    let faulted = false;
+    for (const candidate of CANDIDATES) {
+      let plainBuf;
+      try {
+        plainBuf = await tryCandidate(candidate, password);
+      } catch (e) {
+        // A fault on one file must not hide a key that opens a different one:
+        // remember it and keep looking, so one broken asset can't lock out
+        // every other share key.
+        console.error("[share] " + candidate.name + " failed:", e);
+        faulted = true;
+        continue;
+      }
+      if (!plainBuf) continue;   // just the wrong key for this file
+      const url = URL.createObjectURL(new Blob([plainBuf], { type: "text/plain" }));
+      linkEl.href = url;
+      linkEl.download = candidate.name;
+      labelEl.textContent = candidate.name;
+      statusEl.textContent = "key accepted";
+      entrySection.style.display = "none";
+      resultSection.style.display = "block";
+      return true;
+    }
+    // Only say "wrong key" when every candidate cleanly rejected it.
+    errorEl.textContent = faulted
+      ? "Something went wrong -- see the browser console."
+      : "Incorrect key.";
     return false;
   }
 

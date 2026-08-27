@@ -103,7 +103,24 @@
     return URL.createObjectURL(new Blob([plainBuf], { type: guessMime(path) }));
   }
 
+  // crypto.subtle only exists in a secure context -- https, or localhost. Open
+  // the site over plain http (a LAN IP while testing from a phone, say) and it
+  // is simply undefined, so every unlock throws before it ever looks at the
+  // answer. Returns the message to show, or null when crypto is usable.
+  function cryptoUnavailable() {
+    if (window.crypto && window.crypto.subtle) return null;
+    return window.isSecureContext === false
+      ? "This page must be opened over https (or localhost)."
+      : "This browser can't run the crypto this page needs.";
+  }
+
   async function tryUnlock(rawAnswer, payload, errorEl) {
+    const blocked = cryptoUnavailable();
+    if (blocked) {
+      console.error("[unlock] " + blocked + " (crypto.subtle is unavailable)");
+      if (errorEl) errorEl.textContent = blocked;
+      return false;
+    }
     try {
       const password = normalize(rawAnswer);
       const salt = b64ToBytes(payload.salt);
@@ -112,7 +129,18 @@
       const iterations = payload.iterations || PBKDF2_ITERATIONS_FALLBACK;
 
       const key = await deriveKey(password, salt, iterations);
-      const plaintextBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+
+      // Only an AES-GCM auth-tag rejection means "wrong answer". Everything
+      // outside this inner try is a fault in the page, not in what was typed,
+      // and saying "Incorrect answer." to those is what sent us chasing a
+      // passphrase that had never changed.
+      let plaintextBuf;
+      try {
+        plaintextBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+      } catch (e) {
+        if (errorEl) errorEl.textContent = "Incorrect answer.";
+        return false;
+      }
       const html = new TextDecoder().decode(plaintextBuf);
 
       // Same window survives document.open()/write()/close(), so anything
@@ -128,7 +156,8 @@
       document.close();
       return true;
     } catch (e) {
-      if (errorEl) errorEl.textContent = "Incorrect answer.";
+      console.error("[unlock] failed:", e);
+      if (errorEl) errorEl.textContent = "Something went wrong -- see the browser console.";
       return false;
     }
   }
@@ -140,7 +169,7 @@
   // document.open()/write()/close(), so this stays reachable after a stage is
   // written out. Nothing secret is exposed: deriveKey() marks the key
   // non-extractable, and all of this source is public anyway.
-  window.ARGCrypto = { normalize, b64ToBytes, deriveKey, deriveBitsHex, IV_LEN };
+  window.ARGCrypto = { normalize, b64ToBytes, deriveKey, deriveBitsHex, cryptoUnavailable, IV_LEN };
 
   document.addEventListener("DOMContentLoaded", () => {
     const dataEl = document.getElementById("stage-data");
